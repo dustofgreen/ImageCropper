@@ -4,11 +4,8 @@
 """
 
 import streamlit as st
-import tempfile
-import os
 import zipfile
 import time
-import requests
 from PIL import Image
 import numpy as np
 import cv2
@@ -168,9 +165,12 @@ def extract_pattern(image: np.ndarray, region: dict, target_width: int = None, t
 
 def process_image(image_bytes: bytes, target_width: int = None, target_height: int = None) -> tuple:
     """处理图片，返回ZIP数据和图案数量"""
-    # 读取图片
+    # 直接从字节读取图片
     nparr = np.frombuffer(image_bytes, np.uint8)
     image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+    
+    if image is None:
+        raise ValueError("无法解析图片格式")
     
     # 检测图案
     regions = detect_patterns(image)
@@ -194,20 +194,37 @@ def process_image(image_bytes: bytes, target_width: int = None, target_height: i
 
 
 # 主界面 - 文件上传
+st.markdown("### 📤 上传图片")
 uploaded_file = st.file_uploader(
-    "📤 上传图片",
+    "",
     type=['png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp'],
+    label_visibility="collapsed",
     help="支持 PNG, JPG, GIF, BMP、WebP 格式"
 )
 
-# 预览图片
+# 预览和处理
 if uploaded_file is not None:
-    st.image(uploaded_file, caption="上传的图片", use_container_width=True)
+    # 直接显示上传的图片（使用BytesIO，不依赖URL）
+    col1, col2 = st.columns([1, 1])
+    
+    with col1:
+        st.markdown("**上传的图片：**")
+        # 使用 BytesIO 显示图片，不依赖URL
+        img_display = Image.open(BytesIO(uploaded_file.getvalue()))
+        st.image(img_display, use_container_width=True)
+    
+    with col2:
+        st.markdown("**文件信息：**")
+        st.write(f"- 文件名：{uploaded_file.name}")
+        st.write(f"- 文件大小：{len(uploaded_file.getvalue()) / 1024:.1f} KB")
+        st.write(f"- 文件类型：{uploaded_file.type}")
     
     # 开始处理
+    st.markdown("---")
     if st.button("🚀 开始提取", type="primary", use_container_width=True):
         with st.spinner("正在处理，请稍候..."):
             try:
+                # 直接使用上传的文件内容，不依赖URL
                 image_bytes = uploaded_file.getvalue()
                 
                 # 处理图片

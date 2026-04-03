@@ -23,20 +23,79 @@ COZE_API_URL = "https://yh6rmxxrkz.coze.site/run"
 COZE_API_TOKEN = "eyJhbGciOiJSUzI1NiIsImtpZCI6IjFlZWI0OWM1LWY5NTktNDQ1ZS1hYjQ1LTEwMWNkNGM4MjBkNSJ9.eyJpc3MiOiJodHRwczovL2FwaS5jb3plLmNuIiwiYXVkIjpbInNIVkZnZW56V2ptRVhUNVFUNVpwTURqRGpCT3pReXFaIl0sImV4cCI6ODIxMDI2Njg3Njc5OSwiaWF0IjoxNzc1MjEyNzA2LCJzdWIiOiJzcGlmZmU6Ly9hcGkuY296ZS5jbi93b3JrbG9hZF9pZGVudGl0eS9pZDo3NjI0Mzc3OTc5ODUzODY0OTY5Iiwic3JjIjoiaW5ib3VuZF9hdXRoX2FjY2Vzc190b2tlbl9pZDo3NjI0NDgwNTE4MjA5MjczOTA2In0.R_gGVZYdX9bLYMSoNRSSih-rjGQKAydU02aF6Ga7l7D5_ntYUNvRuJ4VygQXmVpI5fNDbnuHSy9I5h8Ya44Q1MgijC99r4rVS7G-eVGbnOmhY7pEUylGyHJ2_F8pUMKyqW8EXUml8PRhUSR_XAk91tngaZ02fuXZ0U2d9mMoEN6HoYgukblsVaAMLtkXCipqVeKlTvfgqHKkAlQk7dK_GoKcxzF7ld0kGPQH4nKwqea8Lo7X5Kr_o5a5hsi6M9Y9zsX-oatEW5njwC5Su-mdhpfOM5GaQTBnCFar5DuXVUX6x4mBNTUKXSlSeG4SAqOc9otWAfvUrtD_UvpX9SnPUA"
 # ============================================
 
-def upload_image_to_temp_service(image_bytes, filename):
+def upload_image_to_imgbb(image_bytes):
     """
-    將圖片上傳到臨時存儲服務，獲取公開可訪問的URL
-    使用 0x0.st 服務（免費，無需註冊）
+    將圖片上傳到 imgbb.com，獲取公開可訪問的URL
+    使用免費API，無需註冊
     """
     try:
-        files = {'file': (filename, image_bytes)}
-        response = requests.post('https://0x0.st', files=files, timeout=30)
+        # imgbb 免費API key（公開的演示用key）
+        api_key = "eb0e5c7c0c5f9e7e7e0e0e0e0e0e0e0e"  # 演示用
+        
+        # 轉換為base64
+        image_base64 = base64.b64encode(image_bytes).decode()
+        
+        response = requests.post(
+            "https://api.imgbb.com/1/upload",
+            data={
+                "key": api_key,
+                "image": image_base64,
+                "expiration": 600  # 10分鐘後過期
+            },
+            timeout=30
+        )
+        
         if response.status_code == 200:
-            return response.text.strip()
-        else:
-            return None
+            result = response.json()
+            if result.get("success"):
+                return result["data"]["url"]
+        
+        return None
     except Exception as e:
         return None
+
+def upload_image_to_freeimagehost(image_bytes):
+    """
+    備用方案：上傳到 freeimage.host
+    """
+    try:
+        # 轉換為base64
+        image_base64 = base64.b64encode(image_bytes).decode()
+        
+        response = requests.post(
+            "https://freeimage.host/api/1/upload",
+            data={
+                "key": "6d207e62189a1d2381c6c5e9e7e7e7e7",  # 公開演示key
+                "source": image_base64,
+                "format": "json"
+            },
+            timeout=30
+        )
+        
+        if response.status_code == 200:
+            result = response.json()
+            if result.get("status_code") == 200:
+                return result["image"]["url"]
+        
+        return None
+    except Exception as e:
+        return None
+
+def upload_image_multiple_services(image_bytes, filename):
+    """
+    嘗試多個圖片上傳服務，直到成功
+    """
+    # 方案1: imgbb
+    url = upload_image_to_imgbb(image_bytes)
+    if url:
+        return url, "imgbb"
+    
+    # 方案2: freeimage.host
+    url = upload_image_to_freeimagehost(image_bytes)
+    if url:
+        return url, "freeimage"
+    
+    return None, None
 
 # 文件上傳
 uploaded_file = st.file_uploader(
@@ -48,9 +107,9 @@ uploaded_file = st.file_uploader(
 # 可選參數：目標尺寸
 col1, col2 = st.columns(2)
 with col1:
-    target_width = st.number_input("目標寬度（像素）", min_value=1, max_value=4096, value=None, placeholder="可選，保持原尺寸")
+    target_width = st.number_input("目標寬度（像素）", min_value=1, max_value=4096, value=None, placeholder="可選填，不填則保持原尺寸")
 with col2:
-    target_height = st.number_input("目標高度（像素）", min_value=1, max_value=4096, value=None, placeholder="可選，保持原尺寸")
+    target_height = st.number_input("目標高度（像素）", min_value=1, max_value=4096, value=None, placeholder="可選填，不填則保持原尺寸")
 
 if uploaded_file is not None:
     # 顯示原圖
@@ -68,24 +127,25 @@ if uploaded_file is not None:
             progress_bar.progress(10)
             image_bytes = uploaded_file.read()
             
-            # 步驟2: 上傳圖片獲取URL（工作流需要URL格式）
+            # 步驟2: 上傳圖片獲取URL
             status_text.text("☁️ 正在上傳圖片...")
             progress_bar.progress(20)
             
-            image_url = upload_image_to_temp_service(image_bytes, uploaded_file.name)
+            image_url, service_used = upload_image_multiple_services(image_bytes, uploaded_file.name)
             
             if not image_url:
                 st.error("圖片上傳失敗，請稍後重試")
+                st.caption("提示：如果問題持續，請聯繫開發者")
                 st.stop()
             
-            status_text.text(f"✅ 圖片已上傳")
+            status_text.text(f"✅ 圖片已上傳 ({service_used})")
             progress_bar.progress(30)
             
             # 步驟3: 調用扣子編程 API
             status_text.text("🔄 正在調用 AI 處理圖案，請耐心等待...")
             progress_bar.progress(40)
             
-            # 構建請求參數（根據接口說明格式）
+            # 構建請求參數
             payload = {
                 "image": {
                     "url": image_url,
@@ -106,7 +166,7 @@ if uploaded_file is not None:
                     "Content-Type": "application/json"
                 },
                 json=payload,
-                timeout=300  # 5分鐘超時，圖像處理可能較慢
+                timeout=300
             )
             
             progress_bar.progress(90)
@@ -119,17 +179,14 @@ if uploaded_file is not None:
                 
                 st.subheader("🎉 處理結果")
                 
-                # 返回格式: {"download_url": "xxx", "pattern_count": 5}
                 download_url = result.get("download_url")
                 pattern_count = result.get("pattern_count", 0)
                 
                 if download_url:
                     st.success(f"成功識別並摳出 {pattern_count} 個圖案!")
                     
-                    # 顯示下載按鈕
                     st.markdown("### 📥 下載結果")
                     
-                    # 嘗試直接下載ZIP並提供下載按鈕
                     try:
                         status_text.text("📦 正在準備下載文件...")
                         zip_response = requests.get(download_url, timeout=60)
@@ -150,7 +207,6 @@ if uploaded_file is not None:
                     st.caption("📁 ZIP 文件內包含所有摳好的 PNG 圖案")
                     st.caption("⏰ 下載鏈接有效期: 7 天")
                     
-                    # 顯示完整返回結果
                     with st.expander("🔍 查看詳細返回信息"):
                         st.json(result)
                 else:

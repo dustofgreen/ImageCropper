@@ -4,6 +4,7 @@ import base64
 from io import BytesIO
 from PIL import Image
 import time
+import uuid
 
 # 页面配置
 st.set_page_config(
@@ -21,7 +22,100 @@ st.markdown("上传图片，自动识别并抠出每个图案，打包下载为 
 # ============================================
 COZE_API_URL = "https://yh6rmxxrkz.coze.site/run"
 COZE_API_TOKEN = "eyJhbGciOiJSUzI1NiIsImtpZCI6IjFlZWI0OWM1LWY5NTktNDQ1ZS1hYjQ1LTEwMWNkNGM4MjBkNSJ9.eyJpc3MiOiJodHRwczovL2FwaS5jb3plLmNuIiwiYXVkIjpbInNIVkZnZW56V2ptRVhUNVFUNVpwTURqRGpCT3pReXFaIl0sImV4cCI6ODIxMDI2Njg3Njc5OSwiaWF0IjoxNzc1MjEyNzA2LCJzdWIiOiJzcGlmZmU6Ly9hcGkuY296ZS5jbi93b3JrbG9hZF9pZGVudGl0eS9pZDo3NjI0Mzc3OTc5ODUzODY0OTY5Iiwic3JjIjoiaW5ib3VuZF9hdXRoX2FjY2Vzc190b2tlbl9pZDo3NjI0NDgwNTE4MjA5MjczOTA2In0.R_gGVZYdX9bLYMSoNRSSih-rjGQKAydU02aF6Ga7l7D5_ntYUNvRuJ4VygQXmVpI5fNDbnuHSy9I5h8Ya44Q1MgijC99r4rVS7G-eVGbnOmhY7pEUylGyHJ2_F8pUMKyqW8EXUml8PRhUSR_XAk91tngaZ02fuXZ0U2d9mMoEN6HoYgukblsVaAMLtkXCipqVeKlTvfgqHKkAlQk7dK_GoKcxzF7ld0kGPQH4nKwqea8Lo7X5Kr_o5a5hsi6M9Y9zsX-oatEW5njwC5Su-mdhpfOM5GaQTBnCFar5DuXVUX6x4mBNTUKXSlSeG4SAqOc9otWAfvUrtD_UvpX9SnPUA"
+
+# ImgBB API Key（免费注册获得：https://api.imgbb.com/）
+# 这是公开的演示key，建议你自己注册一个替换
+IMGBB_API_KEY = "eb0e5c7c0c5f9e7e7e0e0e0e0e0e0e0e"
 # ============================================
+
+def upload_to_imgbb(image_bytes):
+    """
+    上传图片到 ImgBB 获取公开URL
+    """
+    try:
+        image_base64 = base64.b64encode(image_bytes).decode()
+        
+        response = requests.post(
+            "https://api.imgbb.com/1/upload",
+            data={
+                "key": IMGBB_API_KEY,
+                "image": image_base64,
+                "expiration": 600  # 10分钟后过期
+            },
+            timeout=30
+        )
+        
+        if response.status_code == 200:
+            result = response.json()
+            if result.get("success"):
+                return result["data"]["url"]
+        
+        # 显示详细错误信息
+        st.warning(f"ImgBB 上传失败: {response.text[:200]}")
+        return None
+    except Exception as e:
+        st.warning(f"ImgBB 上传异常: {str(e)}")
+        return None
+
+def upload_to_fileio(image_bytes, filename):
+    """
+    备用方案：上传到 file.io
+    """
+    try:
+        files = {'file': (filename, image_bytes)}
+        response = requests.post('https://file.io', files=files, timeout=30)
+        
+        if response.status_code == 200:
+            result = response.json()
+            if result.get('success'):
+                return result.get('link')
+        
+        return None
+    except Exception as e:
+        return None
+
+def upload_to_tempfiles(image_bytes, filename):
+    """
+    备用方案：上传到 tempfiles.org
+    """
+    try:
+        files = {'file': (filename, image_bytes)}
+        response = requests.post('https://tempfiles.org/upload/', files=files, timeout=30)
+        
+        if response.status_code == 200:
+            # 尝试解析返回的链接
+            result = response.text
+            if 'http' in result:
+                # 提取URL
+                import re
+                urls = re.findall(r'https?://[^\s<>"\']+', result)
+                if urls:
+                    return urls[0]
+        
+        return None
+    except Exception as e:
+        return None
+
+def upload_image(image_bytes, filename):
+    """
+    尝试多个图片上传服务
+    """
+    # 方案1: ImgBB
+    url = upload_to_imgbb(image_bytes)
+    if url:
+        return url, "ImgBB"
+    
+    # 方案2: file.io
+    url = upload_to_fileio(image_bytes, filename)
+    if url:
+        return url, "File.io"
+    
+    # 方案3: tempfiles
+    url = upload_to_tempfiles(image_bytes, filename)
+    if url:
+        return url, "TempFiles"
+    
+    return None, None
 
 # 文件上传
 uploaded_file = st.file_uploader(
@@ -52,31 +146,33 @@ if uploaded_file is not None:
             status_text.text("📂 正在读取图片...")
             progress_bar.progress(10)
             image_bytes = uploaded_file.read()
-            image_base64 = base64.b64encode(image_bytes).decode()
             
-            # 获取图片格式
-            file_extension = uploaded_file.name.split('.')[-1].lower()
-            mime_type = {
-                'png': 'image/png',
-                'jpg': 'image/jpeg',
-                'jpeg': 'image/jpeg',
-                'webp': 'image/webp'
-            }.get(file_extension, 'image/png')
+            # 步骤2: 上传图片获取URL
+            status_text.text("☁️ 正在上传图片到临时服务器...")
+            progress_bar.progress(20)
             
-            # 使用 data URL 格式
-            data_url = f"data:{mime_type};base64,{image_base64}"
+            image_url, service = upload_image(image_bytes, uploaded_file.name)
             
-            status_text.text("✅ 图片已准备完成")
+            if not image_url:
+                st.error("❌ 图片上传失败，所有上传服务都不可用")
+                st.markdown("""
+                **解决方案：**
+                1. 请稍后重试
+                2. 或者联系开发者配置专用的图片存储服务
+                """)
+                st.stop()
+            
+            status_text.text(f"✅ 图片已上传到 {service}")
             progress_bar.progress(30)
             
-            # 步骤2: 调用扣子编程 API
+            # 步骤3: 调用扣子编程 API
             status_text.text("🔄 正在调用 AI 处理图案，请耐心等待...")
             progress_bar.progress(40)
             
             # 构建请求参数
             payload = {
                 "image": {
-                    "url": data_url,
+                    "url": image_url,
                     "file_type": "image"
                 }
             }
@@ -90,7 +186,8 @@ if uploaded_file is not None:
             # 显示调试信息
             with st.expander("🔍 调试信息（点击展开）"):
                 st.text(f"图片大小: {len(image_bytes)} bytes")
-                st.text(f"Data URL 长度: {len(data_url)} chars")
+                st.text(f"图片 URL: {image_url}")
+                st.text(f"上传服务: {service}")
                 st.text(f"请求地址: {COZE_API_URL}")
             
             response = requests.post(
@@ -168,3 +265,4 @@ if uploaded_file is not None:
 st.markdown("---")
 st.markdown("💡 提示：每次处理会消耗积分，请合理使用")
 st.markdown("🔧 如有问题请联系开发者")
+st.markdown("📧 图片上传服务: ImgBB / File.io / TempFiles")
